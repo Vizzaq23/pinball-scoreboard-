@@ -11,11 +11,11 @@ jumbo_img = pygame.image.load("assets/jumboT.png").convert_alpha()
 
 # Scale images
 rink_img = pygame.transform.scale(rink_img, (WIDTH, HEIGHT))
-jumbo_img = pygame.transform.scale(jumbo_img, (800, 350))
+jumbo_img = pygame.transform.scale(jumbo_img, (800, 600))
 
 # Position jumbotron
 jumbo_x = WIDTH // 2 - jumbo_img.get_width() // 2
-jumbo_y = 80
+jumbo_y = 50
 
 # Cutout region (centered inside jumbo)
 cutout_width, cutout_height = 460, 140
@@ -60,27 +60,38 @@ def draw_pioneer(surface, x, y, collected):
 
 # --- DRAW EVERYTHING ---
 def draw_layout():
-    SCREEN.blit(rink_img, (0, 0))                   
-    SCREEN.blit(jumbo_img, (jumbo_x, jumbo_y))     
+    # background + jumbo
+    SCREEN.blit(rink_img, (0, 0))
+    SCREEN.blit(jumbo_img, (jumbo_x, jumbo_y))
 
-    # Score (true centering by measuring surface size)
+    # --- Score (centered inside cutout) ---
     score_text = str(score)
-    temp_font = pygame.font.SysFont("Courier New", 48, bold=True)
-    temp_render = temp_font.render(score_text, True, (255, 255, 255))
-    scaled_width = temp_render.get_width() * 3  # match scale=3
+    # measure the dot-text width via mask
+    font = pygame.font.SysFont("Courier New", 48, bold=True)
+    base = font.render(score_text, True, (255, 255, 255))
+    base = pygame.transform.scale(base, (base.get_width() * 3, base.get_height() * 3))  # scale=3
+    mask = pygame.mask.from_surface(base)
+    text_width = mask.get_size()[0]
+
     draw_dot_text(
         SCREEN, score_text,
-        cutout_rect.centerx - scaled_width // 2,
-        cutout_rect.y + 20,
+        cutout_rect.centerx - text_width // 2,   # true centering
+        cutout_rect.y + 200,
         (255, 255, 255), scale=3
     )
 
-    # Pioneer letters
-    draw_pioneer(SCREEN, cutout_rect.x + 30, cutout_rect.y + cutout_rect.height - 60, collected)
+    # --- Pioneer letters ---
+    draw_pioneer(
+        SCREEN,
+        cutout_rect.x,
+        cutout_rect.y + cutout_rect.height + 258,
+        collected
+    )
 
-    # Balls left
+    # --- Balls left ---
     balls_surf = small_font.render(f"Balls: {balls_left}", True, (255, 255, 255))
     SCREEN.blit(balls_surf, (40, HEIGHT - 60))
+
 
     # Jackpot message
     if mega_jackpot:
@@ -94,3 +105,36 @@ def draw_layout():
         step_y = cutout_rect.height // 5
         for gx in range(cutout_rect.x, cutout_rect.right, step_x):
             pygame.draw.line(SCREEN, (255, 0, 0), (gx, cutout_rect.y), (gx, cutout_rect.bottom), 1)
+        for gy in range(cutout_rect.y, cutout_rect.bottom, step_y):
+            pygame.draw.line(SCREEN, (255, 0, 0), (cutout_rect.x, gy), (cutout_rect.right, gy), 1)
+
+# --- MAIN LOOP ---
+running = True
+while running:
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT:
+            running = False
+        if e.type == pygame.KEYDOWN:
+            if e.key == pygame.K_SPACE:
+                score += 1000
+            elif e.key == pygame.K_t:
+                score += 450
+            elif e.key == pygame.K_g:
+                if collected < len("PIONEER"):
+                    collected += 1
+                if collected == len("PIONEER"):
+                    mega_jackpot = True
+                    score += 10000
+            elif e.key == pygame.K_b:
+                balls_left -= 1
+            elif e.key == pygame.K_r:
+                score, balls_left, collected, mega_jackpot = 0, 2, 0, False
+            elif e.key == pygame.K_d:
+                debug_mode = not debug_mode
+
+    draw_layout()
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
+sys.exit()
