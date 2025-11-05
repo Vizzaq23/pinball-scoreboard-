@@ -4,8 +4,7 @@ import pygame, sys, time
 try:
     from gpiozero import Button
     print("✅ GPIO detected: running on Raspberry Pi hardware.")
-    # Any number of strike plates all wired in parallel to GPIO17 → GND
-    targets_any = Button(17, pull_up=True, bounce_time=0.05)  # 50 ms debounce
+    targets_any = Button(17, pull_up=True)  # all strike plates wired in parallel → GND
     USE_GPIO = True
 except Exception as e:
     print(f"⚠️ GPIO not available ({e}). Using mock button for testing.")
@@ -114,9 +113,7 @@ def on_target_hit():
     if now - last_hit >= HIT_COOLDOWN:
         score += 500
         last_hit = now
-
-if USE_GPIO:
-    targets_any.when_pressed = on_target_hit
+        print("🎯 Target hit! +500")
 
 # --- MAIN LOOP ---
 running = True
@@ -142,7 +139,12 @@ while running:
             elif e.key == pygame.K_d:
                 debug_mode = not debug_mode
 
-    # --- Simulated button for PC testing (ENTER key) ---
+    # --- Check physical strike plates on GPIO17 ---
+    if USE_GPIO and targets_any.is_pressed:
+        on_target_hit()
+        time.sleep(0.2)  # debounce
+
+    # --- Simulated test key (ENTER) ---
     keys = pygame.key.get_pressed()
     if keys[pygame.K_RETURN]:
         on_target_hit()
