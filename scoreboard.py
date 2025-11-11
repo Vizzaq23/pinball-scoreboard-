@@ -1,26 +1,80 @@
-import pygame, sys, time
+import pygame, sys, time, threading
 
 # --- GPIO SETUP (cross-platform safe) ---
 try:
-    from gpiozero import Button
+    from gpiozero import Button, DigitalOutputDevice
     print("✅ GPIO detected: running on Raspberry Pi hardware.")
-    # Strike plates wired in parallel to GPIO17 → GND
-    targets_any = Button(17, pull_up=True, bounce_time=0.15)  # stronger debounce (150ms)
+
+    # Strike plates (wired in parallel → GPIO17 → GND)
+    targets_any = Button(17, pull_up=True, bounce_time=0.15)
+
+    # Bumpers: inputs + solenoid driver outputs
+    BUMPER1_PIN = 22      # input switch for bumper 1
+    BUMPER2_PIN = 23      # input switch for bumper 2
+    BUMPER1_GATE = 5      # MOSFET gate to bumper 1 coil
+    BUMPER2_GATE = 6      # MOSFET gate to bumper 2 coil
+
+    bumper1 = Button(BUMPER1_PIN, pull_up=True, bounce_time=0.1)
+    bumper2 = Button(BUMPER2_PIN, pull_up=True, bounce_time=0.1)
+    gate1 = DigitalOutputDevice(BUMPER1_GATE, active_high=True, initial_value=False)
+    gate2 = DigitalOutputDevice(BUMPER2_GATE, active_high=True, initial_value=False)
+
     USE_GPIO = True
+
 except Exception as e:
-    print(f"⚠️ GPIO not available ({e}). Using mock button for testing.")
+    print(f"⚠️ GPIO not available ({e}). Using mock mode for testing.")
     USE_GPIO = False
+
     class MockButton:
         @property
         def is_pressed(self): return False
         def close(self): pass
+
+    class MockGate:
+        def on(self): pass
+        def off(self): pass
+        def close(self): pass
+
     targets_any = MockButton()
+    bumper1 = MockButton()
+    bumper2 = MockButton()
+    gate1 = MockGate()
+    gate2 = MockGate()
 
 # --- INITIALIZE PYGAME ---
 pygame.init()
 WIDTH, HEIGHT = 1000, 700
 SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("SHU PIONEER ARENA")
+
+# --- SOUND SETUP ---
+pygame.mixer.init()
+try:
+    hit_sound = pygame.mixer.Sound("assets/hit.wav")
+    bumper_sound = pygame.mixer.Sound("assets/bumper.wav")
+    jackpot_sound = pygame.mixer.Sound("assets/jackpot.wav")
+except Exception as e:
+    print("⚠️ Sound files missing or mixer error:", e)
+    hit_sound = bumper_sound = jackpot_sound = None
+
+def play_sound(name):
+    """Play a sound effect by name."""
+    if name == "hit" and hit_sound: hit_sound.play()
+    elif name == "bumper" and bumper_sound: bumper_sound.play()
+    elif name == "jackpot" and jackpot_sound: jackpot_sound.play()
+
+# --- BACKGROUND MUSIC SETUP ---
+def start_music():
+    """Start looping hockey-themed background music."""
+    try:
+        pygame.mixer.music.load("assets/hockey_theme.mp3")
+        pygame.mixer.music.set_volume(0.4)
+        pygame.mixer.music.play(-1)  # -1 = infinite loop
+        print("🎵 Background hockey music playing.")
+    except Exception as e:
+        print("⚠️ Could not load background music:", e)
+
+music_on = True  # for mute toggle
 
 # --- LOAD IMAGES ---
 rink_img = pygame.image.load("assets/icerink.png").convert()
@@ -104,9 +158,9 @@ def draw_layout():
         for gy in range(cutout_rect.y, cutout_rect.bottom, step_y):
             pygame.draw.line(SCREEN, (255,0,0), (cutout_rect.x, gy), (cutout_rect.right, gy), 1)
 
-# --- TARGET HIT HANDLER ---
+# --- STRIKE PLATE HANDLER ---
 last_hit = 0
-HIT_COOLDOWN = 0.4  # seconds, longer to prevent double hits
+HIT_COOLDOWN = 0.4  # seconds
 
 def on_target_hit():
     global last_hit, score
@@ -115,6 +169,31 @@ def on_target_hit():
         score += 500
         last_hit = now
         print("🎯 Target hit! +500")
+        play_sound("hit")
+
+# --- BUMPER HANDLERS ---
+last_bumper_hit = {1: 0, 2: 0}
+BUMPER_COOLDOWN = 0.3
+PULSE_TIME = 0.1
+
+def on_bumper_hit(bumper_id):
+    global last_bumper_hit, score
+    now = time.time()
+    if now - last_bumper_hit[bumper_id] >= BUMPER_COOLDOWN:
+        score += 100
+        last_bumper_hit[bumper_id] = now
+        print(f"💥 Bumper {bumper_id} hit! +100")
+        play_sound("bumper")
+        gate = gate1 if bumper_id == 1 else gate2
+        threading.Thread(target=pulse_solenoid, args=(gate,), daemon=True).start()
+
+def pulse_solenoid(gate):
+    gate.on()
+    time.sleep(PULSE_TIME)
+    gate.off()
+
+# --- START MUSIC BEFORE MAIN LOOP ---
+start_music()
 
 # --- MAIN LOOP ---
 running = True
@@ -133,18 +212,36 @@ while running:
                 if collected == len("PIONEER"):
                     mega_jackpot = True
                     score += 10000
+                    play_sound("jackpot")
             elif e.key == pygame.K_b:
                 balls_left -= 1
             elif e.key == pygame.K_r:
                 score, balls_left, collected, mega_jackpot = 0, 2, 0, False
             elif e.key == pygame.K_d:
                 debug_mode = not debug_mode
+            elif e.key == pygame.K_m:
+                global music_on
+                music_on = not music_on
+                if music_on:
+                    pygame.mixer.music.unpause()
+                    print("🎵 Music ON")
+                else:
+                    pygame.mixer.music.pause()
+                    print("🔇 Music OFF")
 
-    # --- Check physical strike plates on GPIO17 ---
+    # --- Physical targets ---
     if USE_GPIO:
+        # Strike plates
         if targets_any.is_pressed:
             on_target_hit()
-            time.sleep(0.25)  # 250ms debounce delay
+            time.sleep(0.25)
+        # Bumpers
+        if bumper1.is_pressed:
+            on_bumper_hit(1)
+            time.sleep(0.1)
+        if bumper2.is_pressed:
+            on_bumper_hit(2)
+            time.sleep(0.1)
 
     # --- Simulated test key (ENTER) ---
     keys = pygame.key.get_pressed()
@@ -158,5 +255,9 @@ while running:
 
 # --- CLEAN EXIT ---
 targets_any.close()
+bumper1.close()
+bumper2.close()
+gate1.close()
+gate2.close()
 pygame.quit()
 sys.exit()
