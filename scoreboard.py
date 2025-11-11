@@ -182,7 +182,7 @@ def on_bumper_hit(bumper_id):
     if now - last_bumper_hit[bumper_id] >= BUMPER_COOLDOWN:
         score += 100
         last_bumper_hit[bumper_id] = now
-        print(f"💥 Bumper {bumper_id} hit! +100")
+        print(f" Bumper {bumper_id} hit! +100")
         play_sound("bumper")
         gate = gate1 if bumper_id == 1 else gate2
         threading.Thread(target=pulse_solenoid, args=(gate,), daemon=True).start()
@@ -220,7 +220,6 @@ while running:
             elif e.key == pygame.K_d:
                 debug_mode = not debug_mode
             elif e.key == pygame.K_m:
-                global music_on
                 music_on = not music_on
                 if music_on:
                     pygame.mixer.music.unpause()
